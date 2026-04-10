@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NutriLens — AI Calorie Analyzer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        deep: '#0a0a0a',
+                        surface: '#181818',
+                        'surface-l': '#242424',
+                        'surface-ll': '#303030',
+                        neon: '#39ff14',
+                        'neon-dim': '#2bcc10',
+                    },
+                    fontFamily: {
+                        heading: ['Space Grotesk', 'sans-serif'],
+                        body: ['DM Sans', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        :root {
+            --bg: #0a0a0a; --fg: #f0f0f0; --muted: #888;
+            --accent: #39ff14; --card: #181818; --border: #333;
+        }
+        * { box-sizing: border-box; }
+        body {
+            background: var(--bg);
+            color: var(--fg);
+            font-family: 'DM Sans', sans-serif;
+            margin: 0;
+            min-height: 100vh;
+            /* Layered gradient background for depth */
+            background-image:
+                radial-gradient(ellipse 70% 50% at 50% 0%, rgba(57,255,20,0.04) 0%, transparent 60%),
+                radial-gradient(ellipse 60% 40% at 80% 100%, rgba(57,255,20,0.025) 0%, transparent 50%),
+                linear-gradient(180deg, #0d0d0d 0%, #0a0a0a 40%, #080808 100%);
+            background-attachment: fixed;
+        }
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: var(--bg); }
+        ::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+
+        /* Subtle grid overlay */
+        .bg-grid {
+            background-image:
+                linear-gradient(rgba(57,255,20,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(57,255,20,0.03) 1px, transparent 1px);
+            background-size: 48px 48px;
+        }
+
+        /* Floating orbs — brighter and more visible */
+        @keyframes orbFloat {
+            0%,100% { transform: translate(0,0) scale(1); }
+            33% { transform: translate(30px,-20px) scale(1.08); }
+            66% { transform: translate(-20px,15px) scale(0.92); }
+        }
+        .bg-orb {
+            position: fixed; border-radius: 50%;
+            filter: blur(100px); pointer-events: none; z-index: 0;
+            animation: orbFloat 16s ease-in-out infinite;
+        }
+
+        /* Scan line animation */
+        @keyframes scanSweep {
+            0%,100% { top: 4%; opacity: 0.6; }
+            50% { top: 92%; opacity: 1; }
+        }
+        .scan-line {
+            position: absolute; left: 4%; right: 4%; height: 2px;
+            background: linear-gradient(90deg, transparent, #39ff14 25%, #39ff14 75%, transparent);
+            box-shadow: 0 0 16px #39ff14, 0 0 36px rgba(57,255,20,0.4);
+            animation: scanSweep 2s ease-in-out infinite; z-index: 10;
+        }
+
+        /* Staggered fade-in */
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .anim-in { animation: fadeInUp 0.5s ease-out forwards; opacity: 0; }
+        .d1{animation-delay:.06s}.d2{animation-delay:.14s}
+        .d3{animation-delay:.22s}.d4{animation-delay:.30s}
+        .d5{animation-delay:.38s}.d6{animation-delay:.46s}
+        .d7{animation-delay:.54s}
+
+        /* Macro bar transition */
+        .macro-fill { transition: width 1s cubic-bezier(.22,1,.36,1); }
+
+        /* Health arc transition */
+        .health-arc-fg { transition: stroke-dashoffset 1.3s cubic-bezier(.22,1,.36,1); }
+
+        /* Goal progress transition */
+        .goal-bar { transition: width 0.9s cubic-bezier(.22,1,.36,1); }
+
+        /* Neon text glow */
+        .neon-glow { text-shadow: 0 0 10px rgba(57,255,20,0.6), 0 0 24px rgba(57,255,20,0.3), 0 0 40px rgba(57,255,20,0.1); }
+
+        /* Card glow border */
+        .neon-box {
+            border-color: rgba(57,255,20,0.15) !important;
+            box-shadow: 0 0 24px rgba(57,255,20,0.06), 0 4px 20px rgba(0,0,0,0.4);
+        }
+
+        /* Loading dots */
+        @keyframes dotPulse { 0%,100%{opacity:.2} 50%{opacity:1} }
+        .dot-pulse { animation: dotPulse 1.4s ease-in-out infinite; }
+        .dot-pulse:nth-child(2) { animation-delay: .2s; }
+        .dot-pulse:nth-child(3) { animation-delay: .4s; }
+
+        /* Drag-over state */
+        .drag-active { border-color: #39ff14 !important; background: rgba(57,255,20,0.06) !important; }
+
+        /* Ingredient row hover */
+        .ing-row { transition: all .2s ease; }
+        .ing-row:hover { background: rgba(57,255,20,0.08); transform: translateX(4px); }
+
+        /* Meal card hover */
+        .meal-card { transition: all .22s ease; }
+        .meal-card:hover { border-color: rgba(57,255,20,0.3) !important; transform: translateY(-2px); box-shadow: 0 8px 28px rgba(0,0,0,0.5); }
+
+        /* Toast slide-in */
+        @keyframes toastIn { from{transform:translateX(110%);opacity:0} to{transform:translateX(0);opacity:1} }
+        .toast-enter { animation: toastIn .3s ease-out forwards; }
+
+        /* Modal backdrop */
+        .modal-bg { background: rgba(0,0,0,0.8); backdrop-filter: blur(6px); }
+
+        /* Focus ring */
+        input:focus, button:focus-visible { outline: 2px solid #39ff14; outline-offset: 2px; }
+
+        /* Shimmer border animation */
+        @keyframes borderShimmer {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        .shimmer-border {
+            background: linear-gradient(90deg, #333 0%, #39ff14 50%, #333 100%);
+            background-size: 200% 100%;
+            animation: borderShimmer 3.5s ease infinite;
+        }
+
+        /* Reduced motion */
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+        }
+    </style>
+</head>
+<body class="bg-grid">
+    <!-- Atmospheric glow orbs — tuned brighter -->
+    <div class="bg-orb" style="width:400px;height:400px;background:rgba(57,255,20,0.05);top:-5%;left:-5%"></div>
+    <div class="bg-orb" style="width:280px;height:280px;background:rgba(57,255,20,0.035);top:50%;right:-8%;animation-delay:-6s"></div>
+    <div class="bg-orb" style="width:320px;height:320px;background:rgba(57,255,20,0.03);bottom:-8%;left:30%;animation-delay:-11s"></div>
+
+    <div id="root"></div>
+
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/htm@3/dist/htm.js"></script>
+    <script>
+    var html = htm.bind(React.createElement);
+    var useState = React.useState, useEffect = React.useEffect,
+        useRef = React.useRef, useCallback = React.useCallback;
+
+    /* ── Utilities ── */
+    function resizeImage(file, max) {
+        max = max || 1024;
+        return new Promise(function(resolve) {
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                var img = new Image();
+                img.onload = function() {
+                    var c = document.createElement('canvas');
+                    var w = img.width, h = img.height;
+                    if (w > max || h > max) {
+                        if (w > h) { h = (h / w) * max; w = max; }
+                        else { w = (w / h) * max; h = max; }
+                    }
+                    c.width = w; c.height = h;
+                    c.getContext('2d').drawImage(img, 0, 0, w, h);
+                    resolve(c.toDataURL('image/jpeg', 0.82));
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+
+    function parseClaudeJSON(text) {
+        var s = text.trim();
+        if (s.indexOf('```') === 0) s = s.replace(/^```(?:json)?\n?/, '').replace(/\n?```\s*$/, '');
+        return JSON.parse(s);
+    }
+
+    function fmtTime(d) { return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+
+    /* ── Toast ── */
+    function Toast(p) {
+        useEffect(function() { var t = setTimeout(p.onClose, 3500); return function() { clearTimeout(t); }; }, []);
+        var bc = p.type === 'success' ? '#39ff14' : p.type === 'error' ? '#ff4444' : '#ffaa00';
+        return html`<div class="fixed top-4 right-4 z-[200] toast-enter">
+            <div class="border rounded-xl px-4 py-3 shadow-2xl max-w-xs" style=${{ background: '#1e1e1e', borderLeft: '4px solid ' + bc, borderColor: '#333' }}>
+                <p class="text-sm font-body" style=${{ color: '#e0e0e0' }}>${p.message}</p>
+            </div>
+        </div>`;
+    }
+
+    /* ── API Key Modal ── */
+    function ApiKeyModal(p) {
+        var _k = useState(p.apiKey || ''), key = _k[0], setKey = _k[1];
+        var ref = useRef(null);
+        useEffect(function() { if (ref.current) ref.current.focus(); }, []);
+        return html`<div class="fixed inset-0 z-[100] modal-bg flex items-center justify-center p-4"
+            onClick=${function(e) { if (e.target === e.currentTarget) p.onClose(); }}>
+            <div class="rounded-2xl p-6 max-w-md w-full anim-in" style=${{ background: '#1a1a1a', border: '1px solid #3a3a3a' }}>
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-11 h-11 rounded-xl flex items-center justify-center" style=${{ background: 'rgba(57,255,20,0.12)' }}>
+                        <i class="fas fa-shield-halved text-neon"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-heading text-lg font-semibold" style=${{ color: '#f0f0f0' }}>Connect to Claude</h3>
+                        <p class="text-xs font-body" style=${{ color: '#777' }}>Anthropic API key required</p>
+                    </div>
+                </div>
+                <p class="text-sm font-body mb-4 leading-relaxed" style=${{ color: '#aaa' }}>
+                    Your key stays in your browser only and is sent exclusively to Anthropic's API for meal analysis.
+                </p>
+                <input ref=${ref} type="password"
+                    class="w-full rounded-xl px-4 py-3 text-sm font-body"
+                    style=${{ background: '#252525', border: '1px solid #3a3a3a', color: '#e0e0e0' }}
+                    placeholder="sk-ant-api03-..." value=${key}
+                    onInput=${function(e) { setKey(e.target.value); }}
+                    onKeyDown=${function(e) { if (e.key === 'Enter' && key.trim()) p.onSave(key.trim()); }} />
+                <div class="flex gap-3 mt-5">
+                    ${p.apiKey ? html`<button class="flex-1 rounded-xl py-2.5 text-sm font-body transition-colors" style=${{ background: '#252525', color: '#999' }} onClick=${p.onClose}>Skip</button>` : null}
+                    <button class="flex-1 bg-neon text-deep font-semibold rounded-xl py-2.5 text-sm font-heading hover:brightness-110 transition-all disabled:opacity-30"
+                        disabled=${!key.trim()}
+                        onClick=${function() { if (key.trim()) p.onSave(key.trim()); }}>Save Key</button>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    /* ── Health Score Gauge (SVG arc) ── */
+    function HealthGauge(p) {
+        var score = p.score, animated = p.animated;
+        var R = 52, C = 2 * Math.PI * R;
+        var target = C * (1 - score / 10);
+        var current = animated ? target : C;
+        var col = score >= 8 ? '#39ff14' : score >= 6 ? '#a8e000' : score >= 4 ? '#ffaa00' : '#ff4444';
+        return html`<div class="relative w-[130px] h-[130px] mx-auto">
+            <svg class="w-full h-full" viewBox="0 0 120 120" style=${{ transform: 'rotate(-90deg)' }}>
+                <circle cx="60" cy="60" r=${R} fill="none" stroke="#2a2a2a" stroke-width="7" />
+                <circle cx="60" cy="60" r=${R} fill="none" stroke=${col} stroke-width="7"
+                    stroke-linecap="round" stroke-dasharray=${C} stroke-dashoffset=${current}
+                    class="health-arc-fg" style=${{ filter: 'drop-shadow(0 0 6px ' + col + '50)' }} />
+            </svg>
+            <div class="absolute inset-0 flex flex-col items-center justify-center">
+                <span class="font-heading text-3xl font-bold" style=${{ color: col }}>${score}</span>
+                <span class="text-[10px] font-body" style=${{ color: '#666' }}>/ 10</span>
+            </div>
+        </div>`;
+    }
+
+    /* ── Macro Breakdown Bar ── */
+    function MacroBar(p) {
+        var m = p.macros, animated = p.animated;
+        var pc = m.protein_g * 4, cc = m.carbs_g * 4, fc = m.fat_g * 9;
+        var tot = pc + cc + fc || 1;
+        var pp = animated ? (pc / tot) * 100 : 0;
+        var cp = animated ? (cc / tot) * 100 : 0;
+        var fp = animated ? (fc / tot) * 100 : 0;
+        return html`<div>
+            <div class="h-3.5 rounded-full overflow-hidden flex" style=${{ background: '#222' }}>
+                <div class="macro-fill rounded-l-full" style=${{ width: pp+'%', background: 'linear-gradient(90deg, #39ff14, #2bcc10)', boxShadow: '0 0 8px rgba(57,255,20,0.3)' }}></div>
+                <div class="macro-fill" style=${{ width: cp+'%', background: 'linear-gradient(90deg, #00d4ff, #0099cc)', boxShadow: '0 0 8px rgba(0,212,255,0.3)' }}></div>
+                <div class="macro-fill rounded-r-full" style=${{ width: fp+'%', background: 'linear-gradient(90deg, #ff8c00, #cc6600)', boxShadow: '0 0 8px rgba(255,140,0,0.3)' }}></div>
+            </div>
+            <div class="flex justify-between mt-3 text-xs font-body">
+                <span class="flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full" style=${{ background: '#39ff14', boxShadow: '0 0 4px rgba(57,255,20,0.5)' }}></span>
+                    <span style=${{ color: '#999' }}>Protein</span>
+                    <span style=${{ color: '#e0e0e0' }} class="font-medium">${m.protein_g}g</span>
+                </span>
+                <span class="flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full" style=${{ background: '#00d4ff', boxShadow: '0 0 4px rgba(0,212,255,0.5)' }}></span>
+                    <span style=${{ color: '#999' }}>Carbs</span>
+                    <span style=${{ color: '#e0e0e0' }} class="font-medium">${m.carbs_g}g</span>
+                </span>
+                <span class="flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full" style=${{ background: '#ff8c00', boxShadow: '0 0 4px rgba(255,140,0,0.5)' }}></span>
+                    <span style=${{ color: '#999' }}>Fat</span>
+                    <span style=${{ color: '#e0e0e0' }} class="font-medium">${m.fat_g}g</span>
+                </span>
+            </div>
+        </div>`;
+    }
+
+    /* ── Mini Macro Bar for log cards ── */
+    function MiniMacroBar(p) {
+        var m = p.macros;
+        var pc = m.protein_g * 4, cc = m.carbs_g * 4, fc = m.fat_g * 9;
+        var tot = pc + cc + fc || 1;
+        return html`<div class="flex h-1.5 rounded-full overflow-hidden w-full" style=${{ background: '#252525' }}>
+            <div style=${{ width:(pc/tot)*100+'%', background:'#39ff14' }}></div>
+            <div style=${{ width:(cc/tot)*100+'%', background:'#00d4ff' }}></div>
+            <div style=${{ width:(fc/tot)*100+'%', background:'#ff8c00' }}></div>
+        </div>`;
+    }
+
+    /* ── Main App ── */
+    function App() {
+        var _key = useState(function(){ return localStorage.getItem('nl_key')||''; });
+        var apiKey=_key[0], setApiKey=_key[1];
+        var _goal = useState(function(){ return parseInt(localStorage.getItem('nl_goal'))||2000; });
+        var calorieGoal=_goal[0], setCalorieGoal=_goal[1];
+        var _meals = useState([]);
+        var meals=_meals[0], setMeals=_meals[1];
+        var _img = useState(null);
+        var imagePreview=_img[0], setImagePreview=_img[1];
+        var _load = useState(false);
+        var loading=_load[0], setLoading=_load[1];
+        var _err = useState(null);
+        var error=_err[0], setError=_err[1];
+        var _res = useState(null);
+        var results=_res[0], setResults=_res[1];
+        var _anim = useState(false);
+        var animated=_anim[0], setAnimated=_anim[1];
+        var _clear = useState(false);
+        var showClear=_clear[0], setShowClear=_clear[1];
+        var _modal = useState(false);
+        var showKeyModal=_modal[0], setShowKeyModal=_modal[1];
+        var _toast = useState(null);
+        var toast=_toast[0], setToast=_toast[1];
+        var _editGoal = useState(false);
+        var editGoal=_editGoal[0], setEditGoal=_editGoal[1];
+        var _goalInput = useState(calorieGoal);
+        var goalInput=_goalInput[0], setGoalInput=_goalInput[1];
+        var _drag = useState(false);
+        var dragOver=_drag[0], setDragOver=_drag[1];
+
+        var fileRef = useRef(null);
+        var camRef = useRef(null);
+        var goalRef = useRef(null);
+
+        var dailyTotal = meals.reduce(function(s,m){ return s+m.total_calories; },0);
+        var goalPct = Math.min((dailyTotal/calorieGoal)*100, 100);
+        var goalColor = dailyTotal>calorieGoal ? '#ff4444' : dailyTotal>calorieGoal*0.85 ? '#ffaa00' : '#39ff14';
+        var goalLabel = dailyTotal>calorieGoal ? 'Goal exceeded' : dailyTotal>calorieGoal*0.85 ? 'Approaching limit' : 'On track';
+
+        /* Trigger result animations after mount */
+        useEffect(function(){
+            if(results){
+                setAnimated(false);
+                var r = requestAnimationFrame(function(){ requestAnimationFrame(function(){ setAnimated(true); }); });
+                return function(){ cancelAnimationFrame(r); };
+            } else { setAnimated(false); }
+        },[results]);
+
+        useEffect(function(){
+            if(editGoal && goalRef.current){ goalRef.current.focus(); goalRef.current.select(); }
+        },[editGoal]);
+
+        function showToast(msg,type){ setToast({message:msg, type:type||'success'}); }
+        function saveKey(k){ localStorage.setItem('nl_key',k); setApiKey(k); setShowKeyModal(false); showToast('API key saved'); }
+        function saveGoal(){
+            var v=parseInt(goalInput);
+            if(v&&v>0){ setCalorieGoal(v); localStorage.setItem('nl_goal',v); setEditGoal(false); }
+        }
+
+        function handleFile(file){
+            if(!file||!file.type.startsWith('image/')) return;
+            setError(null); setResults(null);
+            resizeImage(file).then(function(d){ setImagePreview(d); });
+        }
+        function onDragOver(e){ e.preventDefault(); setDragOver(true); }
+        function onDragLeave(e){ e.preventDefault(); setDragOver(false); }
+        function onDrop(e){ e.preventDefault(); setDragOver(false); var f=e.dataTransfer.files[0]; if(f) handleFile(f); }
+
+        function analyzeMeal(){
+            if(!apiKey){ setShowKeyModal(true); return; }
+            if(!imagePreview) return;
+            setLoading(true); setError(null); setResults(null);
+            var parts = imagePreview.split(',');
+            var mediaType = parts[0].match(/:(.*?);/)[1];
+            var base64Data = parts[1];
+            var sysPrompt = 'You are a precise nutritional analysis AI. Analyze the food/meal in this image and return ONLY valid JSON with no markdown, no code blocks, no explanation. Schema:\n'+
+                '{"meal_name":"string","total_calories":number,"macros":{"protein_g":number,"carbs_g":number,"fat_g":number},' +
+                '"ingredients":[{"name":"string","calories":number}],"health_score":number,"health_tip":"string"}\n'+
+                'Be accurate. If unclear or not food: {"error":"Unable to identify food. Please try a clearer photo."}';
+            fetch('https://api.anthropic.com/v1/messages',{
+                method:'POST',
+                headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+                body: JSON.stringify({
+                    model:'claude-sonnet-4-20250514', max_tokens:1024, system:sysPrompt,
+                    messages:[{role:'user',content:[
+                        {type:'image',source:{type:'base64',media_type:mediaType,data:base64Data}},
+                        {type:'text',text:'Analyze this meal and return nutritional JSON only.'}
+                    ]}]
+                })
+            })
+            .then(function(r){
+                if(!r.ok) return r.json().then(function(e){ throw new Error(e.error?.message||'API error '+r.status); });
+                return r.json();
+            })
+            .then(function(data){
+                var parsed = parseClaudeJSON(data.content[0].text);
+                if(parsed.error) throw new Error(parsed.error);
+                setResults(parsed);
+            })
+            .catch(function(err){ setError(err.message||'Analysis failed. Please try again.'); })
+            .finally(function(){ setLoading(false); });
+        }
+
+        function addToLog(){
+            if(!results) return;
+            setMeals(function(prev){ return [{...results,id:Date.now(),time:new Date(),image:imagePreview}].concat(prev); });
+            showToast(results.meal_name+' added to log');
+            setResults(null); setImagePreview(null);
+        }
+        function resetAnalysis(){ setResults(null); setImagePreview(null); setError(null); }
+        function clearLog(){ setMeals([]); setShowClear(false); showToast('Daily log cleared'); }
+
+        /* ── Shared card style ── */
+        var cardStyle = { background: '#161616', border: '1px solid #333' };
+
+        /* ── Render ── */
+        return html`<div class="relative z-10 min-h-screen flex flex-col">
+
+            ${toast ? html`<${Toast} message=${toast.message} type=${toast.type} onClose=${function(){setToast(null);}} />` : null}
+            ${showKeyModal ? html`<${ApiKeyModal} apiKey=${apiKey} onSave=${saveKey} onClose=${function(){setShowKeyModal(false);}} />` : null}
+
+            <!-- Header -->
+            <header class="sticky top-0 z-40" style=${{ background: 'rgba(10,10,10,0.88)', backdropFilter: 'blur(18px)', borderBottom: '1px solid #2a2a2a' }}>
+                <div class="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
+                    <div class="flex items-center gap-2.5">
+                        <div class="w-9 h-9 rounded-lg flex items-center justify-center" style=${{ background: 'rgba(57,255,20,0.14)', boxShadow: '0 0 12px rgba(57,255,20,0.15)' }}>
+                            <i class="fas fa-eye text-neon text-sm"></i>
+                        </div>
+                        <div>
+                            <h1 class="font-heading text-lg font-bold tracking-tight" style=${{ color: '#f0f0f0' }}>NutriLens</h1>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span class="text-xs font-body hidden sm:block" style=${{ color: '#888' }}>${dailyTotal.toLocaleString()} kcal today</span>
+                        <button class="w-9 h-9 rounded-lg flex items-center justify-center transition-colors" style=${{ background: '#222', border: '1px solid #333' }}
+                            onClick=${function(){setShowKeyModal(true);}} aria-label="Settings">
+                            <i class="fas fa-gear text-xs" style=${{ color: '#999' }}></i>
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <main class="flex-1 max-w-2xl mx-auto w-full px-4 py-6 space-y-6">
+
+                <!-- Goal Tracker -->
+                <section class="anim-in">
+                    <div class="rounded-2xl p-5 neon-box" style=${cardStyle}>
+                        <div class="flex items-center justify-between mb-3">
+                            <div class="flex items-center gap-2">
+                                ${editGoal ? html`
+                                    <input ref=${goalRef} type="number" min="500" max="10000"
+                                        class="w-24 rounded-lg px-2 py-1 text-sm font-heading font-semibold"
+                                        style=${{ background:'#252525', border:'1px solid #444', color:'#e0e0e0' }}
+                                        value=${goalInput}
+                                        onInput=${function(e){setGoalInput(e.target.value);}}
+                                        onKeyDown=${function(e){if(e.key==='Enter')saveGoal();if(e.key==='Escape')setEditGoal(false);}}
+                                        onBlur=${saveGoal} />
+                                ` : html`
+                                    <span class="font-heading font-semibold" style=${{ color: '#e0e0e0' }}>${calorieGoal.toLocaleString()}</span>
+                                `}
+                                <span class="text-xs font-body" style=${{ color: '#666' }}>kcal goal</span>
+                                ${!editGoal ? html`
+                                    <button style=${{ color:'#555' }} class="hover:!text-neon transition-colors ml-1" onClick=${function(){setGoalInput(calorieGoal);setEditGoal(true);}} aria-label="Edit goal">
+                                        <i class="fas fa-pen" style=${{ fontSize:'10px' }}></i>
+                                    </button>
+                                ` : null}
+                            </div>
+                            <div class="text-right">
+                                <span class="font-heading text-xl font-bold" style=${{ color: goalColor }}>${dailyTotal.toLocaleString()}</span>
+                                <span class="text-xs font-body ml-1" style=${{ color: '#666' }}>kcal</span>
+                            </div>
+                        </div>
+                        <div class="h-3 rounded-full overflow-hidden" style=${{ background: '#222' }}>
+                            <div class="goal-bar h-full rounded-full" style=${{ width: goalPct+'%', background: goalColor, boxShadow: '0 0 10px '+goalColor+'50' }}></div>
+                        </div>
+                        <div class="flex justify-between mt-2">
+                            <span class="text-[11px] font-body" style=${{ color: goalColor }}>${goalLabel}</span>
+                            <span class="text-[11px] font-body" style=${{ color: '#555' }}>${Math.round(goalPct)}% of goal</span>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Main Analysis Area -->
+                <section>
+                    ${!imagePreview && !loading && !results ? html`
+                        <div class="anim-in d1">
+                            <div class=${"rounded-2xl p-8 text-center transition-all cursor-pointer " + (dragOver ? "drag-active" : "")}
+                                style=${{ ...cardStyle, borderStyle: 'dashed', borderWidth: '2px', borderColor: dragOver ? '#39ff14' : '#3a3a3a' }}
+                                onClick=${function(){fileRef.current&&fileRef.current.click();}}
+                                onDragOver=${onDragOver} onDragLeave=${onDragLeave} onDrop=${onDrop}>
+                                <div class="shimmer-border h-[3px] rounded-full mb-6 -mt-2 opacity-50"></div>
+                                <div class="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center"
+                                    style=${{ background: 'rgba(57,255,20,0.1)', boxShadow: '0 0 20px rgba(57,255,20,0.1)' }}>
+                                    <i class="fas fa-camera-retro text-neon text-2xl"></i>
+                                </div>
+                                <h2 class="font-heading text-xl font-semibold mb-2" style=${{ color: '#f0f0f0' }}>Scan Your Meal</h2>
+                                <p class="text-sm font-body mb-5" style=${{ color: '#888' }}>Drop an image here or tap to upload a meal photo</p>
+                                <div class="flex items-center justify-center gap-3 flex-wrap">
+                                    <button class="bg-neon text-deep font-semibold rounded-xl px-5 py-2.5 text-sm font-heading hover:brightness-110 transition-all"
+                                        style=${{ boxShadow: '0 0 16px rgba(57,255,20,0.25)' }}
+                                        onClick=${function(e){e.stopPropagation();fileRef.current&&fileRef.current.click();}}>
+                                        <i class="fas fa-upload mr-2 text-xs"></i>Upload Photo
+                                    </button>
+                                    <button class="rounded-xl px-5 py-2.5 text-sm font-body transition-colors"
+                                        style=${{ background: '#252525', border: '1px solid #3a3a3a', color: '#ccc' }}
+                                        onClick=${function(e){e.stopPropagation();camRef.current&&camRef.current.click();}}>
+                                        <i class="fas fa-camera mr-2 text-xs"></i>Camera
+                                    </button>
+                                </div>
+                                <div class="shimmer-border h-[3px] rounded-full mt-6 -mb-2 opacity-50"></div>
+                            </div>
+                            <input ref=${fileRef} type="file" accept="image/*" class="hidden" onChange=${function(e){if(e.target.files[0])handleFile(e.target.files[0]);e.target.value='';}} />
+                            <input ref=${camRef} type="file" accept="image/*" capture="environment" class="hidden" onChange=${function(e){if(e.target.files[0])handleFile(e.target.files[0]);e.target.value='';}} />
+                        </div>
+                    ` : null}
+
+                    ${loading ? html`
+                        <div class="anim-in">
+                            <div class="rounded-2xl overflow-hidden" style=${cardStyle}>
+                                <div class="relative aspect-video max-h-[320px] overflow-hidden" style=${{ background: '#0a0a0a' }}>
+                                    <img src=${imagePreview} alt="Scanning meal" class="w-full h-full object-cover" style=${{ filter: 'brightness(0.45) saturate(0.7)' }} />
+                                    <div class="scan-line"></div>
+                                    <div class="absolute inset-0" style=${{ background: 'linear-gradient(180deg, rgba(57,255,20,0.04) 0%, transparent 25%, transparent 75%, rgba(57,255,20,0.04) 100%)' }}></div>
+                                </div>
+                                <div class="p-5 text-center" style=${{ background: '#161616', borderTop: '1px solid #2a2a2a' }}>
+                                    <div class="flex items-center justify-center gap-2 mb-2.5">
+                                        <span class="w-2 h-2 rounded-full bg-neon dot-pulse" style=${{ boxShadow: '0 0 6px #39ff14' }}></span>
+                                        <span class="w-2 h-2 rounded-full bg-neon dot-pulse" style=${{ boxShadow: '0 0 6px #39ff14' }}></span>
+                                        <span class="w-2 h-2 rounded-full bg-neon dot-pulse" style=${{ boxShadow: '0 0 6px #39ff14' }}></span>
+                                    </div>
+                                    <p class="font-heading font-semibold" style=${{ color: '#e0e0e0' }}>Analyzing your meal</p>
+                                    <p class="text-xs font-body mt-1" style=${{ color: '#777' }}>Claude Vision is identifying ingredients and estimating nutrition</p>
+                                </div>
+                            </div>
+                        </div>
+                    ` : null}
+
+                    ${error ? html`
+                        <div class="anim-in">
+                            <div class="rounded-2xl p-6 text-center" style=${{ ...cardStyle, borderColor: 'rgba(255,68,68,0.35)' }}>
+                                <div class="w-12 h-12 rounded-xl mx-auto mb-3 flex items-center justify-center" style=${{ background: 'rgba(255,68,68,0.12)' }}>
+                                    <i class="fas fa-triangle-exclamation text-lg" style=${{ color: '#ff4444' }}></i>
+                                </div>
+                                <h3 class="font-heading font-semibold mb-1" style=${{ color: '#e0e0e0' }}>Analysis Failed</h3>
+                                <p class="text-sm font-body mb-4 max-w-sm mx-auto" style=${{ color: '#999' }}>${error}</p>
+                                <div class="flex items-center justify-center gap-3">
+                                    <button class="rounded-xl px-4 py-2 text-sm font-body transition-colors" style=${{ background: '#252525', color: '#ccc', border: '1px solid #3a3a3a' }} onClick=${resetAnalysis}>
+                                        <i class="fas fa-arrow-left mr-2 text-xs"></i>Back
+                                    </button>
+                                    <button class="bg-neon text-deep font-semibold rounded-xl px-4 py-2 text-sm font-heading hover:brightness-110 transition-all" onClick=${analyzeMeal}>
+                                        <i class="fas fa-rotate-right mr-2 text-xs"></i>Retry
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    ` : null}
+
+                    ${results && !loading ? html`
+                        <div>
+                            <!-- Meal image preview -->
+                            <div class="anim-in d1 mb-4 rounded-xl overflow-hidden" style=${{ border: '1px solid #333', height: '140px' }}>
+                                <img src=${imagePreview} alt="Analyzed meal" class="w-full h-full object-cover" />
+                            </div>
+
+                            <!-- Meal name & calories — hero card -->
+                            <div class="anim-in d2 rounded-2xl p-6 neon-box mb-4" style=${{ background: 'linear-gradient(145deg, #1a1a1a 0%, #141414 100%)', border: '1px solid rgba(57,255,20,0.18)' }}>
+                                <p class="text-[11px] font-body uppercase tracking-widest mb-1" style=${{ color: '#666', letterSpacing: '0.15em' }}>Identified Meal</p>
+                                <h2 class="font-heading text-xl font-bold mb-4" style=${{ color: '#f5f5f5' }}>${results.meal_name}</h2>
+                                <div class="flex items-end gap-2">
+                                    <span class="font-heading font-bold neon-glow text-neon" style=${{ fontSize: '52px', lineHeight: '1' }}>${results.total_calories}</span>
+                                    <span class="font-body text-sm mb-2" style=${{ color: '#777' }}>kcal</span>
+                                </div>
+                            </div>
+
+                            <!-- Macros -->
+                            <div class="anim-in d3 rounded-2xl p-5 mb-4" style=${cardStyle}>
+                                <p class="text-[11px] font-body uppercase tracking-widest mb-3" style=${{ color: '#666', letterSpacing: '0.15em' }}>Macro Breakdown</p>
+                                <${MacroBar} macros=${results.macros} animated=${animated} />
+                            </div>
+
+                            <!-- Ingredients -->
+                            <div class="anim-in d4 rounded-2xl p-5 mb-4" style=${cardStyle}>
+                                <p class="text-[11px] font-body uppercase tracking-widest mb-3" style=${{ color: '#666', letterSpacing: '0.15em' }}>Ingredients</p>
+                                <div class="space-y-1">
+                                    ${results.ingredients.map(function(ing, i) {
+                                        var totalIng = results.ingredients.reduce(function(s,x){return s+x.calories;},0)||1;
+                                        var pct = Math.round((ing.calories/totalIng)*100);
+                                        return html`<div key=${i} class="ing-row flex items-center justify-between rounded-lg px-3 py-2.5 cursor-default">
+                                            <div class="flex items-center gap-3">
+                                                <div class="w-1 h-8 rounded-full" style=${{ background: 'rgba(57,255,20,'+(0.25+pct*0.0075)+')', boxShadow: '0 0 4px rgba(57,255,20,'+(0.1+pct*0.003)+')' }}></div>
+                                                <span class="text-sm font-body" style=${{ color: '#ddd' }}>${ing.name}</span>
+                                            </div>
+                                            <span class="text-xs font-heading font-semibold px-2.5 py-1 rounded-lg" style=${{ background: 'rgba(57,255,20,0.1)', color: '#39ff14' }}>${ing.calories} kcal</span>
+                                        </div>`;
+                                    })}
+                                </div>
+                            </div>
+
+                            <!-- Health Score & Tip -->
+                            <div class="anim-in d5 rounded-2xl p-5 mb-5" style=${cardStyle}>
+                                <div class="flex flex-col sm:flex-row items-center gap-5">
+                                    <div class="flex-shrink-0">
+                                        <p class="text-[11px] font-body uppercase tracking-widest text-center mb-2" style=${{ color: '#666', letterSpacing: '0.15em' }}>Health Score</p>
+                                        <${HealthGauge} score=${results.health_score} animated=${animated} />
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <p class="text-[11px] font-body uppercase tracking-widest mb-2" style=${{ color: '#666', letterSpacing: '0.15em' }}>AI Health Tip</p>
+                                        <div class="rounded-xl p-4" style=${{ background: '#1e1e1e', border: '1px solid #2e2e2e' }}>
+                                            <p class="text-sm font-body leading-relaxed" style=${{ color: '#ccc' }}>
+                                                <i class="fas fa-lightbulb mr-2 text-xs" style=${{ color: '#ffcc00' }}></i>${results.health_tip}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Action buttons -->
+                            <div class="anim-in d6 flex gap-3">
+                                <button class="flex-1 bg-neon text-deep font-bold rounded-xl py-3.5 text-sm font-heading hover:brightness-110 transition-all"
+                                    style=${{ boxShadow: '0 0 20px rgba(57,255,20,0.25)' }}
+                                    onClick=${addToLog}>
+                                    <i class="fas fa-plus mr-2"></i>Add to Daily Log
+                                </button>
+                                <button class="rounded-xl px-5 py-3.5 text-sm font-body transition-colors"
+                                    style=${{ background: '#252525', border: '1px solid #3a3a3a', color: '#999' }}
+                                    onClick=${resetAnalysis}>
+                                    <i class="fas fa-arrow-rotate-left"></i>
+                                </button>
+                            </div>
+                        </div>
+                    ` : null}
+                </section>
+
+                <!-- Daily Log -->
+                <section>
+                    <div class="flex items-center justify-between mb-3">
+                        <h2 class="font-heading text-base font-semibold flex items-center gap-2" style=${{ color: '#e0e0e0' }}>
+                            <i class="fas fa-list-check text-neon text-sm" style=${{ textShadow: '0 0 6px rgba(57,255,20,0.4)' }}></i>Daily Log
+                            ${meals.length>0 ? html`<span class="text-xs font-body font-normal" style=${{ color: '#555' }}>(${meals.length} meal${meals.length>1?'s':''})</span>` : null}
+                        </h2>
+                        ${meals.length>0 ? html`
+                            <div>
+                                ${showClear ? html`
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-xs font-body" style=${{ color: '#777' }}>Clear all?</span>
+                                        <button class="text-xs font-body font-medium transition-colors" style=${{ color: '#ff4444' }} onClick=${clearLog}>Yes</button>
+                                        <button class="text-xs font-body transition-colors" style=${{ color: '#666' }} onClick=${function(){setShowClear(false);}}>No</button>
+                                    </div>
+                                ` : html`
+                                    <button class="text-xs font-body transition-colors" style=${{ color: '#555' }}
+                                        onClick=${function(){setShowClear(true);}}>
+                                        <i class="fas fa-trash-can mr-1"></i>Clear
+                                    </button>
+                                `}
+                            </div>
+                        ` : null}
+                    </div>
+
+                    ${meals.length===0 ? html`
+                        <div class="rounded-2xl p-8 text-center" style=${cardStyle}>
+                            <div class="w-14 h-14 rounded-xl mx-auto mb-3 flex items-center justify-center" style=${{ background: 'rgba(57,255,20,0.07)' }}>
+                                <i class="fas fa-utensils text-lg" style=${{ color: '#555' }}></i>
+                            </div>
+                            <p class="text-sm font-body" style=${{ color: '#666' }}>No meals logged yet</p>
+                            <p class="text-xs font-body mt-1" style=${{ color: '#444' }}>Upload a photo above to start tracking</p>
+                        </div>
+                    ` : html`
+                        <div class="space-y-3">
+                            ${meals.map(function(meal, i) {
+                                return html`<div key=${meal.id} class="meal-card rounded-xl p-4 flex gap-4 items-start" style=${{ ...cardStyle, animation: 'fadeInUp 0.4s ease-out '+(i*0.05)+'s forwards', opacity: 0 }}>
+                                    ${meal.image ? html`
+                                        <div class="w-14 h-14 rounded-lg overflow-hidden flex-shrink-0" style=${{ border: '1px solid #333' }}>
+                                            <img src=${meal.image} alt=${meal.meal_name} class="w-full h-full object-cover" />
+                                        </div>
+                                    ` : null}
+                                    <div class="flex-1 min-w-0">
+                                        <div class="flex items-start justify-between gap-2 mb-1.5">
+                                            <h3 class="font-heading text-sm font-semibold truncate" style=${{ color: '#ddd' }}>${meal.meal_name}</h3>
+                                            <span class="font-heading text-sm font-bold text-neon flex-shrink-0" style=${{ textShadow: '0 0 6px rgba(57,255,20,0.3)' }}>${meal.total_calories}</span>
+                                        </div>
+                                        <${MiniMacroBar} macros=${meal.macros} />
+                                        <div class="flex items-center gap-3 mt-2 font-body" style=${{ fontSize: '10px', color: '#555' }}>
+                                            <span>P ${meal.macros.protein_g}g</span>
+                                            <span>C ${meal.macros.carbs_g}g</span>
+                                            <span>F ${meal.macros.fat_g}g</span>
+                                            <span class="ml-auto"><i class="far fa-clock mr-1"></i>${fmtTime(meal.time)}</span>
+                                        </div>
+                                    </div>
+                                </div>`;
+                            })}
+                        </div>
+                    `}
+                </section>
+
+            </main>
+
+            <!-- Footer -->
+            <footer style=${{ borderTop: '1px solid #1e1e1e' }} class="py-5 mt-auto">
+                <div class="max-w-2xl mx-auto px-4 flex items-center justify-between">
+                    <p class="text-[11px] font-body" style=${{ color: '#444' }}>Powered by Claude Vision</p>
+                    <p class="text-[11px] font-body" style=${{ color: '#444' }}>NutriLens v1.0</p>
+                </div>
+            </footer>
+        </div>`;
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(html`<${App} />`);
+    </script>
+</body>
+</html>
